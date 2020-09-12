@@ -6,20 +6,23 @@
 //
 
 import UIKit
+import GameKit
 
-class ViewController: UIViewController {
+class ViewController: UIViewController, GKGameCenterControllerDelegate, UINavigationControllerDelegate {
     @IBOutlet weak var button1: UIButton!
     @IBOutlet weak var button2: UIButton!
     @IBOutlet weak var button3: UIButton!
+    @IBOutlet weak var gameCenterButton: UIButton!
     var scoreLabel: UILabel!
     var feedbackGenerator: UINotificationFeedbackGenerator? = nil
     
     var countries = [String]()
-    var score = 0
+    var score: Int64 = 0
     var correctAnswer = 0
     var questionsAsked = 0
     let maxQuestions = 4
     var lastCountry = ""
+    var leaderboards = [GKLeaderboard]()
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -27,10 +30,6 @@ class ViewController: UIViewController {
         scoreLabel = UILabel()
         scoreLabel.text = "Score: \(score)"
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Score: \(score)", style: .plain, target: self, action: .startOver)
-        
-//         without using a Selector extension
-//        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Score: \(score)", style: .plain, target: self, action: #selector(self.clearScore))
-
         
         button1.layer.borderWidth = 1
         button2.layer.borderWidth = 1
@@ -44,6 +43,11 @@ class ViewController: UIViewController {
         
         feedbackGenerator = UINotificationFeedbackGenerator()
         feedbackGenerator?.prepare()
+        
+        gameCenterButton.isEnabled = false
+        
+        authenticateLocalPlayer()
+                
         askQuestion()
     }
     
@@ -61,8 +65,6 @@ class ViewController: UIViewController {
         button2.setImage(UIImage(named: countries[1]), for: .normal)
         button3.setImage(UIImage(named: countries[2]), for: .normal)
         
-//        appending score to title makes the text jump around too much since title is centered
-//        title = countries[correctAnswer].uppercased() + "  Score: \(score)"
         title = countries[correctAnswer].uppercased()
 
         navigationItem.rightBarButtonItem?.title = "Score: \(score)"
@@ -83,16 +85,15 @@ class ViewController: UIViewController {
         }
         
         if questionsAsked == maxQuestions {
-            let ac = UIAlertController(title: title, message: message + "Your final score is \(score) out of \(maxQuestions).\nStarting over.", preferredStyle: .alert)
+            reportScore(score: score)
             
-            ac.addAction(UIAlertAction(title: "OK", style: .default, handler: startOver))
-            present(ac, animated: true)
-
+            GKNotificationBanner.show(withTitle: title, message: message + "Your final score is \(score) out of \(maxQuestions). Starting over.", duration: 1, completionHandler: {
+                self.startOver()
+            })
         } else {
-            let ac = UIAlertController(title: title, message: message + "Your score is \(score)", preferredStyle: .alert)
-            
-            ac.addAction(UIAlertAction(title: "Continue", style: .default, handler: askQuestion))
-            present(ac, animated: true)
+            GKNotificationBanner.show(withTitle: title, message: message + "Your score is \(score)", duration: 0.75, completionHandler: {
+                self.askQuestion()
+            })
         }
     }
     
@@ -105,6 +106,67 @@ class ViewController: UIViewController {
     @objc func startOver(action: UIAlertAction! = nil) {
         clearScore()
         askQuestion()
+    }
+    
+    @IBAction func openGameCenter(_ sender: Any) {
+        let gc = GKGameCenterViewController()
+        gc.delegate = self
+        
+        present(gc, animated: true, completion: nil)
+    }
+    
+    func authenticateLocalPlayer() {
+        let localPlayer = GKLocalPlayer.local
+        
+        localPlayer.authenticateHandler = { (vc: UIViewController?, error: Error?) -> Void in
+            if let viewController = vc {
+                self.showAuthenticationViewController(viewController)
+            } else if localPlayer.isAuthenticated {
+                self.gameCenterButton.isEnabled = true
+            } else {
+                self.disableGameCenter()
+            }
+        }
+            
+    }
+    
+    func authenticateHandler(vc: UIViewController?, error: Error?) -> Void {
+        
+    }
+    
+    func showAuthenticationViewController(_ vc: UIViewController) {
+        present(vc, animated: true, completion: nil)
+    }
+    
+    func disableGameCenter() {
+        gameCenterButton.isEnabled = false
+    }
+    
+    @IBAction func showLeaderboard(_ sender: Any) {
+        GKLeaderboard.loadLeaderboards(completionHandler: { leaderboards, error in
+            let gameCenterController = GKGameCenterViewController()
+            gameCenterController.gameCenterDelegate = self
+            gameCenterController.viewState = .leaderboards;
+            gameCenterController.leaderboardTimeScope = .today;
+            gameCenterController.leaderboardIdentifier = "firstLeaderboardID"
+            self.present(gameCenterController, animated: true, completion:nil)
+        })
+    }
+    
+    func gameCenterViewControllerDidFinish(_ gameCenterViewController: GKGameCenterViewController) {
+        gameCenterViewController.dismiss(animated: true, completion: nil)
+    }
+    
+    func reportScore(score: Int64) {
+        let scoreReporter = GKScore(leaderboardIdentifier: "firstLeaderboardID")
+        scoreReporter.value = score
+        scoreReporter.context = 0
+        
+        GKScore.report([scoreReporter], withCompletionHandler: { error in
+            if let error = error {
+                print("error reporting score \(error)")
+            }
+        })
     }
 }
 
